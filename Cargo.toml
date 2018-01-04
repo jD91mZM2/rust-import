@@ -1,0 +1,13 @@
+[package]
+authors = ["jD91mZM2 <me@krake.one>"]
+name = "rust-import"
+version = "0.1.0"
+[dependencies]
+clap = "2.29.0"
+
+[dependencies.quote]
+git = "https://github.com/dtolnay/quote"
+
+[dependencies.syn]
+features = ["full", "parsing", "printing"]
+git = "https://github.com/dtolnay/syn"
