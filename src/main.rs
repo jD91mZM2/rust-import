@@ -1,23 +1,27 @@
 #[macro_use] extern crate clap;
+#[macro_use] extern crate failure;
 extern crate quote;
 extern crate syn;
 
 use clap::{App, Arg};
+use failure::Error;
 use quote::ToTokens;
 use std::env;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use syn::{Item, ItemUse};
+use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
 
 fn main() {
+    let reserved_names = &[Ident::from("self"), Ident::from("crate")]; // TODO const fn
+
     let matches = App::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
         .arg(Arg::with_name("file")
-            .help("The file to alter"))
+            .help("The file to alter")
+            .required(true))
         .arg(Arg::with_name("path")
             .help("The path to add"))
         .arg(Arg::with_name("print")
@@ -28,23 +32,7 @@ fn main() {
 
     let print = matches.is_present("print");
     let path = matches.value_of("path");
-    let file = matches.value_of("file").map(|s| PathBuf::from(s)).or_else(|| {
-        let mut path = env::current_dir().ok()?;
-        while !path.join("Cargo.toml").exists() {
-            if !path.pop() {
-                return None;
-            }
-        }
-        path.push("src");
-        path.push("main.rs");
-        Some(path)
-    });
-
-    if file.is_none() {
-        eprintln!("no path specified and main.rs could not be found");
-        return;
-    }
-    let file = file.unwrap();
+    let file = matches.value_of("file").unwrap();
 
     let mut file = match OpenOptions::new().read(true).write(true).open(file) {
         Ok(file) => file,
@@ -84,6 +72,12 @@ fn main() {
         }
     };
 
+    let existing_crates = find_crates();
+
+    if let Err(ref err) = existing_crates {
+        println!("warning: failed to find existing extern crates: {}", err);
+    }
+
     let mut syntax = match syn::parse_file(&src) {
         Ok(syntax) => syntax,
         Err(err) => {
@@ -92,13 +86,31 @@ fn main() {
         }
     };
     let result = {
-        let first_use = syntax.items.iter().position(|item| {
+        // Get extern crate section
+        let first_crate = syntax.items.iter().position(|item| {
+            if let Item::ExternCrate(_) = *item { true } else { false }
+        });
+        if first_crate.is_none() {
+            unimplemented!("No existing `extern crate`. This isn't implemented yet.");
+        }
+        let (before, crates) = syntax.items.split_at(first_crate.unwrap());
+        let first_not = crates.iter().position(|item| {
+            if let Item::ExternCrate(_) = *item { false } else { true }
+        });
+        let (crates, after) = if let Some(first_not) = first_not {
+            crates.split_at(first_not)
+        } else {
+            (crates, &[] as &[syn::Item])
+        };
+
+        // Get use section
+        let first_use = after.iter().position(|item| {
             if let Item::Use(_) = *item { true } else { false }
         });
         if first_use.is_none() {
             unimplemented!("No existing `use`. This isn't implemented yet.");
         }
-        let (before, imports) = syntax.items.split_at(first_use.unwrap());
+        let (between, imports) = after.split_at(first_use.unwrap());
         let first_not = imports.iter().position(|item| {
             if let Item::Use(_) = *item { false } else { true }
         });
@@ -108,16 +120,46 @@ fn main() {
             (imports, &[] as &[syn::Item])
         };
 
+        // Allocate the things that might change
+        let mut crates = crates.to_vec();
         let mut imports = imports.to_vec();
 
+        let mut modified = false;
+
         if let Some(path) = path {
+            if let Some(first) = path.prefix.first() {
+                let item = first.into_item();
+                if !reserved_names.contains(&item) {
+                    if let Ok(existing_crates) = existing_crates {
+                        if !existing_crates.contains(&item) {
+                            crates.push(Item::ExternCrate(ItemExternCrate {
+                                attrs: Vec::new(),
+                                vis: Visibility::Inherited,
+                                extern_token: syn::token::Extern::default(),
+                                crate_token: syn::token::Crate::default(),
+                                ident: *item,
+                                rename: None,
+                                semi_token: syn::token::Semi::default()
+                            }));
+                        }
+                    }
+                }
+            }
             imports.push(Item::Use(path));
+            modified = true;
         }
 
-        let mut result = Vec::with_capacity(before.len() + imports.len() + after.len());
-        result.extend_from_slice(&before);
-        result.extend_from_slice(&imports);
-        result.extend_from_slice(&after);
+        let result = if modified {
+            let mut result = Vec::with_capacity(before.len() + imports.len() + after.len());
+            result.extend_from_slice(&before);
+            result.extend_from_slice(&crates);
+            result.extend_from_slice(&between);
+            result.extend_from_slice(&imports);
+            result.extend_from_slice(&after);
+            Some(result)
+        } else {
+            None
+        };
 
         if print {
             for item in imports {
@@ -127,7 +169,11 @@ fn main() {
             }
         }
 
-        result
+        if !modified {
+            return;
+        }
+
+        result.unwrap()
     };
 
     syntax.items = result;
@@ -169,4 +215,41 @@ fn main() {
     if let Err(err) = io::copy(&mut child.stdout.unwrap(), &mut file) {
         eprintln!("error writing to file: {}", err);
     }
+}
+
+#[derive(Debug, Fail)]
+#[fail(display = "failed to find main.rs or lib.rs")]
+struct NotFoundError;
+
+fn find_crates() -> Result<Vec<syn::Ident>, Error> {
+    let mut path = env::current_dir()?;
+    while !path.join("Cargo.toml").exists() {
+        if !path.pop() {
+            return Err(NotFoundError.into());
+        }
+    }
+    path.push("src");
+    path.push("main.rs");
+    if !path.exists() {
+        path.pop();
+        path.push("lib.rs");
+    }
+    if !path.exists() {
+        return Err(NotFoundError.into());
+    }
+
+    let mut src = String::new();
+    File::open(&path)?.read_to_string(&mut src)?;
+
+    let syntax = syn::parse_file(&src)?;
+
+    let mut crates = Vec::with_capacity(8); // just a guess
+
+    for item in &syntax.items {
+        if let Item::ExternCrate(ref ext) = *item {
+            let name = ext.rename.map(|rename| rename.1).unwrap_or(ext.ident);
+            crates.push(name);
+        }
+    };
+    Ok(crates)
 }
