@@ -3,12 +3,14 @@ extern crate quote;
 extern crate syn;
 
 use clap::{App, Arg};
-use std::env;
-use std::fs::File;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use syn::{Item, ItemUse};
 use quote::ToTokens;
+use std::env;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
+use std::io::{self, SeekFrom};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use syn::{Item, ItemUse};
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -44,8 +46,16 @@ fn main() {
     }
     let file = file.unwrap();
 
+    let mut file = match OpenOptions::new().read(true).write(true).open(file) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("failed to open file: {}", err);
+            return;
+        }
+    };
+
     let mut src = String::new();
-    if let Err(err) = read(&file, &mut src) {
+    if let Err(err) = file.read_to_string(&mut src) {
         eprintln!("error reading file: {}", err);
         return;
     }
@@ -123,7 +133,40 @@ fn main() {
     syntax.items = result;
 
     // TODO: https://github.com/dtolnay/syn/issues/294
-}
-fn read<P: AsRef<Path>>(file: P, src: &mut String) -> Result<(), std::io::Error> {
-    File::open(file)?.read_to_string(src).map(|_| ())
+    let child = Command::new("rustfmt")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let child = match child {
+        Ok(child) => child,
+        Err(err) => {
+            eprintln!("failed to run command: {}", err);
+            return;
+        }
+    };
+
+    if let Err(err) = child.stdin.unwrap().write_all(syntax.into_tokens().to_string().as_bytes()) {
+        eprintln!("failed to write to rustfmt: {}", err);
+        return;
+    }
+
+    let mut error = String::new();
+    if let Err(err) = child.stderr.unwrap().read_to_string(&mut error) {
+        eprintln!("failed to read stderr: {}", err);
+        return;
+    }
+    let error = error.trim();
+    if !error.chars().all(char::is_whitespace) {
+        eprintln!("rustfmt returned error: {}", error);
+        return;
+    }
+
+    if let Err(err) = file.seek(SeekFrom::Start(0)).and_then(|_| file.set_len(0)) {
+        eprintln!("failed to truncate file: {}", err);
+        return;
+    }
+    if let Err(err) = io::copy(&mut child.stdout.unwrap(), &mut file) {
+        eprintln!("error writing to file: {}", err);
+    }
 }
