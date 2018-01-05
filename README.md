@@ -1,6 +1,6 @@
 # rust-import
 
-First attempt at making an importing utility in Rust.
+First attempt at making an importing utility for Rust.
 
 ## Why?
 
