@@ -20,6 +20,16 @@ Having a reliable way to add an import statement would greatly help with this.
 
 **Abslutely not**. This is not in a usable state yet.
 
+## Unanswered questions
+
+[Should we just rely on the compiler?](https://www.reddit.com/r/rust/comments/7oibl7/attempt_at_autoimporting_for_rust_help_and_ideas/ds9s0gb/)
+
+If not,
+
+How do you get each token in `syn`?  
+Does that allow me to count how many blocks deep?  
+Does that allow me to know which tokens are idents?
+
 ## Auto import?
 
 Here's how I think the auto-import should work:
@@ -32,9 +42,3 @@ Here's how I think the auto-import should work:
     - Every path gets added to a list of all things, along with the level.
     - Every time an ident that isn't imported is seen, it tries to import one from the learned ones.
     - Every time a block is closed, blocks -= 1 and remove all the things from the list.
-
-## Unanswered questions
-
-How do you get each token in `syn`?  
-Does that allow me to count how many blocks deep?  
-Does that allow me to know which tokens are idents?
