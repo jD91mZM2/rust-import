@@ -22,13 +22,7 @@ Having a reliable way to add an import statement would greatly help with this.
 
 ## Unanswered questions
 
-[Should we just rely on the compiler?](https://www.reddit.com/r/rust/comments/7oibl7/attempt_at_autoimporting_for_rust_help_and_ideas/ds9s0gb/)
-
-If not,
-
-How do you get each token in `syn`?  
-Does that allow me to count how many blocks deep?  
-Does that allow me to know which tokens are idents?
+[Moved to GitHub issue](https://github.com/jD91mZM2/rust-import/issues/2)
 
 ## Auto import?
 
