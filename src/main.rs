@@ -14,7 +14,12 @@ use std::process::{Command, Stdio};
 use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
 
 fn main() {
-    let reserved_names = &[Ident::from("self"), Ident::from("crate"), Ident::from("std")]; // TODO const fn
+    let reserved_names = &[
+        Ident::from("crate"),
+        Ident::from("self"),
+        Ident::from("std"),
+        Ident::from("super")
+    ]; // TODO const fn
 
     let matches = App::new(crate_name!())
         .author(crate_authors!())
