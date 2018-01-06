@@ -19,3 +19,16 @@ Having a reliable way to add an import statement would greatly help with this.
 ## How do I use it?
 
 **Abslutely not**. This is not in a usable state yet.
+
+## Auto import?
+
+Here's how I think the auto-import should work:
+
+  - There is a `-l` flag that takes arguments like `std::io::TcpStream,UdpStream`, etc.
+  - That means it learns about `std`, `std::io`, `std::io::TcpStream` and `std::io::UdpStream`.
+  - Then it goes through the code, looking for use statements.
+    - Every time a block is seen, blocks += 1.
+    - Every path gets expanded (globs get read from the learn).
+    - Every path gets added to a list of all things, along with the level.
+    - Every time an ident that isn't imported is seen, it tries to import one from the learned ones.
+    - Every time a block is closed, blocks -= 1 and remove all the things from the list.
