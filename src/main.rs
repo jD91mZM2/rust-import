@@ -112,9 +112,9 @@ fn main() {
         if let Some(path) = path {
             if let Some(first) = path.prefix.first() {
                 let item = first.into_item();
-                if !reserved_names.contains(&item) {
+                if !reserved_names.contains(item) {
                     if let Ok(existing_crates) = existing_crates {
-                        if !existing_crates.contains(&item) {
+                        if !existing_crates.contains(item) {
                             crates.push(Item::ExternCrate(ItemExternCrate {
                                 attrs: Vec::new(),
                                 vis: Visibility::Inherited,
