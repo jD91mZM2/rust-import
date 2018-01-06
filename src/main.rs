@@ -30,7 +30,7 @@ fn main() {
         .arg(Arg::with_name("path")
             .help("The path to add"))
         .arg(Arg::with_name("print")
-            .help("Print all existing import AST")
+            .help("Print all existing imports")
             .short("p")
             .long("print"))
         .get_matches();
