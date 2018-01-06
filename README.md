@@ -32,3 +32,9 @@ Here's how I think the auto-import should work:
     - Every path gets added to a list of all things, along with the level.
     - Every time an ident that isn't imported is seen, it tries to import one from the learned ones.
     - Every time a block is closed, blocks -= 1 and remove all the things from the list.
+
+## Unanswered questions
+
+How do you get each token in `syn`?  
+Does that allow me to count how many blocks deep?  
+Does that allow me to know which tokens are idents?
