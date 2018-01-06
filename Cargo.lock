@@ -83,6 +83,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "indextree"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "libc"
 version = "0.2.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "clap 2.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "indextree 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.3.15 (git+https://github.com/dtolnay/quote)",
  "syn 0.11.11 (git+https://github.com/dtolnay/syn)",
 ]
@@ -246,6 +252,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum clap 2.29.0 (registry+https://github.com/rust-lang/crates.io-index)" = "110d43e343eb29f4f51c1db31beb879d546db27998577e5715270a54bcf41d3f"
 "checksum failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "934799b6c1de475a012a02dab0ace1ace43789ee4b99bcfbf1a2e3e8ced5de82"
 "checksum failure_derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "c7cdda555bb90c9bb67a3b670a0f42de8e73f5981524123ad8578aafec8ddb8b"
+"checksum indextree 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2a7a9bba58b624eb4a5336e728be35b60db0216a41db4bc9630de28c352e13bd"
 "checksum libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)" = "96264e9b293e95d25bfcbbf8a88ffd1aedc85b754eba8b7d78012f638ba220eb"
 "checksum proc-macro2 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)" = "ab6440b3913c779c363a7f43bc557fe67760f3130de43bc3cfd7a7357c2708c6"
 "checksum quote 0.3.15 (git+https://github.com/dtolnay/quote)" = "<none>"

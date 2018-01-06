@@ -5,6 +5,7 @@ version = "0.1.0"
 [dependencies]
 clap = "2.29.0"
 failure = "0.1.1"
+indextree = "1.1.0"
 
 [dependencies.quote]
 git = "https://github.com/dtolnay/quote"
