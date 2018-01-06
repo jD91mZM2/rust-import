@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
 
 fn main() {
-    let reserved_names = &[Ident::from("self"), Ident::from("crate")]; // TODO const fn
+    let reserved_names = &[Ident::from("self"), Ident::from("crate"), Ident::from("std")]; // TODO const fn
 
     let matches = App::new(crate_name!())
         .author(crate_authors!())
@@ -86,43 +86,21 @@ fn main() {
         }
     };
     let result = {
-        // Get extern crate section
-        let first_crate = syntax.items.iter().position(|item| {
-            if let Item::ExternCrate(_) = *item { true } else { false }
-        });
-        if first_crate.is_none() {
-            unimplemented!("No existing `extern crate`. This isn't implemented yet.");
-        }
-        let (before, crates) = syntax.items.split_at(first_crate.unwrap());
-        let first_not = crates.iter().position(|item| {
-            if let Item::ExternCrate(_) = *item { false } else { true }
-        });
-        let (crates, after) = if let Some(first_not) = first_not {
-            crates.split_at(first_not)
-        } else {
-            (crates, &[] as &[syn::Item])
-        };
+        // Count how much to allocate
+        let crates_len = syntax.items.iter().filter(|&item| is_extern_crate(item)).count();
+        let uses_len   = syntax.items.iter().filter(|&item| is_use(item)).count();
 
-        // Get use section
-        let first_use = after.iter().position(|item| {
-            if let Item::Use(_) = *item { true } else { false }
-        });
-        if first_use.is_none() {
-            unimplemented!("No existing `use`. This isn't implemented yet.");
-        }
-        let (between, imports) = after.split_at(first_use.unwrap());
-        let first_not = imports.iter().position(|item| {
-            if let Item::Use(_) = *item { false } else { true }
-        });
-        let (imports, after) = if let Some(first_not) = first_not {
-            imports.split_at(first_not)
-        } else {
-            (imports, &[] as &[syn::Item])
-        };
+        // Separate crates and uses from the rest
+        let mut crates = Vec::with_capacity(crates_len);
+        let mut uses   = Vec::with_capacity(uses_len);
 
-        // Allocate the things that might change
-        let mut crates = crates.to_vec();
-        let mut imports = imports.to_vec();
+        syntax.items.retain(|item| {
+            match *item {
+                Item::ExternCrate(_) => { crates.push(item.clone()); false },
+                Item::Use(_) => { uses.push(item.clone()); false },
+                _ => true
+            }
+        });
 
         let mut modified = false;
 
@@ -145,24 +123,22 @@ fn main() {
                     }
                 }
             }
-            imports.push(Item::Use(path));
+            uses.push(Item::Use(path));
             modified = true;
         }
 
         let result = if modified {
-            let mut result = Vec::with_capacity(before.len() + imports.len() + after.len());
-            result.extend_from_slice(&before);
+            let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
             result.extend_from_slice(&crates);
-            result.extend_from_slice(&between);
-            result.extend_from_slice(&imports);
-            result.extend_from_slice(&after);
+            result.extend_from_slice(&uses);
+            result.extend_from_slice(&syntax.items);
             Some(result)
         } else {
             None
         };
 
         if print {
-            for item in imports {
+            for item in uses {
                 if let Item::Use(import) = item {
                     println!("{}", import.into_tokens());
                 } else { unreachable!(); }
@@ -215,6 +191,13 @@ fn main() {
     if let Err(err) = io::copy(&mut child.stdout.unwrap(), &mut file) {
         eprintln!("error writing to file: {}", err);
     }
+}
+
+fn is_extern_crate(item: &Item) -> bool {
+    if let Item::ExternCrate(_) = *item { true } else { false }
+}
+fn is_use(item: &Item) -> bool {
+    if let Item::Use(_) = *item { true } else { false }
 }
 
 #[derive(Debug, Fail)]
