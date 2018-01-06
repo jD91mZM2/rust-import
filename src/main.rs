@@ -1,19 +1,17 @@
 #[macro_use] extern crate clap;
 #[macro_use] extern crate failure;
-extern crate indextree;
 extern crate quote;
 extern crate syn;
 
 use clap::{App, Arg};
 use failure::Error;
-use indextree::{Arena, NodeId};
 use quote::ToTokens;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
 use std::process::{Command, Stdio};
-use syn::{Ident, Item, ItemExternCrate, ItemUse, Stmt, Visibility};
+use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
 
 fn main() {
     let reserved_names = &[Ident::from("self"), Ident::from("crate"), Ident::from("std")]; // TODO const fn
@@ -30,42 +28,11 @@ fn main() {
             .help("Print all existing import AST")
             .short("p")
             .long("print"))
-        .arg(Arg::with_name("learn")
-            .help("Learn about a path")
-            .short("l")
-            .long("learn")
-            .multiple(true)
-            .takes_value(true))
         .get_matches();
 
     let print = matches.is_present("print");
     let path = matches.value_of("path");
     let file = matches.value_of("file").unwrap();
-    let learn = matches.values_of("learn");
-
-    let mut learned = Arena::new();
-    let root = learned.new_node("");
-    if let Some(learn) = learn {
-        for path in learn {
-            let mut parent = root;
-            for segment in path.split("::") {
-                let mut first_node = None;
-                for ident in segment.split(',') {
-                    let node = parent.children(&learned)
-                        .find(|child| learned[*child].data == ident)
-                        .unwrap_or_else(|| learned.new_node(ident));
-                    parent.append(node, &mut learned);
-                    if first_node.is_none() {
-                        first_node = Some(node);
-                    }
-                }
-                parent = first_node.unwrap();
-            }
-        }
-    }
-
-    // TODO: remove
-    print_node(&learned, root, 0);
 
     let mut file = match OpenOptions::new().read(true).write(true).open(file) {
         Ok(file) => file,
@@ -134,18 +101,6 @@ fn main() {
                 _ => true
             }
         });
-
-        for item in &syntax.items {
-            if let Item::Fn(ref fun) = *item {
-                for stmt in &fun.block.stmts {
-                    if let Stmt::Semi(ref expr, _) = *stmt {
-                        println!("{}", expr.into_tokens());
-                        // TODO How do I reliably get all idents as opposed to only function calls?
-                        // TODO Also, does that method support getting braces so I can count those?
-                    }
-                }
-            }
-        }
 
         let mut modified = false;
 
@@ -280,11 +235,4 @@ fn find_crates() -> Result<Vec<syn::Ident>, Error> {
         }
     };
     Ok(crates)
-}
-
-fn print_node<T: std::fmt::Display>(arena: &Arena<T>, node: NodeId, indent: usize) {
-    println!("{}- {}", " ".repeat(indent), arena[node].data);
-    for child in node.children(&arena) {
-        print_node(arena, child, indent+2);
-    }
 }
