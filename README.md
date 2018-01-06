@@ -24,8 +24,8 @@ Having a reliable way to add an import statement would greatly help with this.
 
 Here's how I think the auto-import should work:
 
-  - There is a `-l` flag that takes arguments like `std::io::TcpStream,UdpStream`, etc.
-  - That means it learns about `std`, `std::io`, `std::io::TcpStream` and `std::io::UdpStream`.
+  - There is a `-l` flag that takes arguments like `std::net::TcpStream,UdpStream`, etc.
+  - That means it learns about `std`, `std::net`, `std::net::TcpStream` and `std::net::UdpStream`.
   - Then it goes through the code, looking for use statements.
     - Every time a block is seen, blocks += 1.
     - Every path gets expanded (globs get read from the learn).
