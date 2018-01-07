@@ -1,6 +1,8 @@
 #[macro_use] extern crate clap;
 #[macro_use] extern crate failure;
+#[macro_use] extern crate serde_derive;
 extern crate quote;
+extern crate serde_json;
 extern crate syn;
 
 use clap::{App, Arg};
@@ -10,8 +12,11 @@ use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
+
+mod compile;
 
 fn main() {
     let reserved_names = &[
@@ -33,13 +38,18 @@ fn main() {
             .help("Print all existing imports")
             .short("p")
             .long("print"))
+        .arg(Arg::with_name("auto")
+            .help("Fight the compiler, attempt at auto-import")
+            .short("a")
+            .long("auto-import"))
         .get_matches();
 
-    let print = matches.is_present("print");
+    let auto = matches.is_present("auto");
+    let file_name = Path::new(matches.value_of("file").unwrap());
     let path = matches.value_of("path");
-    let file = matches.value_of("file").unwrap();
+    let print = matches.is_present("print");
 
-    let mut file = match OpenOptions::new().read(true).write(true).open(file) {
+    let mut file = match OpenOptions::new().read(true).write(true).open(&file_name) {
         Ok(file) => file,
         Err(err) => {
             eprintln!("failed to open file: {}", err);
@@ -130,6 +140,21 @@ fn main() {
             }
             uses.push(Item::Use(path));
             modified = true;
+        }
+
+        if auto {
+            match compile::compile(file_name) {
+                Ok(imports) => {
+                    if !imports.is_empty() {
+                        uses.extend(imports.into_iter().map(|(_, item)| Item::Use(item)));
+                        modified = true;
+                    }
+                }
+                Err(err) => {
+                    eprintln!("auto import failed: {}", err);
+                    return;
+                }
+            }
         }
 
         let result = if modified {
