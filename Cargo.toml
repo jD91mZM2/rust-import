@@ -5,13 +5,11 @@ version = "0.1.0"
 [dependencies]
 clap = "2.29.0"
 failure = "0.1.1"
+quote = "0.4.2"
 serde = "1.0.27"
 serde_derive = "1.0.27"
 serde_json = "1.0.9"
 
-[dependencies.quote]
-git = "https://github.com/dtolnay/quote"
-
 [dependencies.syn]
 features = ["full", "parsing", "printing"]
-git = "https://github.com/dtolnay/syn"
+version = "0.12.0"
