@@ -10,7 +10,7 @@ Having a reliable way to add an import statement would greatly help with this.
 ## Goals
 
  - [ ] Group imports
- - [ ] Preserve formatting (See [dtolnay/syn#294](https://github.com/dtolnay/syn/issues/294))
+ - [ ] Preserve formatting (Discussion in #3)
  - [ ] Sort imports
  - [x] Actually make it work somewhat
  - [x] Add missing `extern crate`s
