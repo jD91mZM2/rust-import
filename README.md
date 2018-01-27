@@ -24,3 +24,5 @@ Having a reliable way to add an import statement would greatly help with this.
 
 I did have a plan to auto-import stuff, but I got multiple recommendations to leave that to the RLS.  
 [Reddit thread](https://redd.it/7oibl7)
+
+There is some basic auto importing with the `-a` option that asks Cargo what to import.
