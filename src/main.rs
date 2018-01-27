@@ -1,31 +1,22 @@
 #[macro_use] extern crate clap;
-#[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
+extern crate failure;
 extern crate quote;
 extern crate serde_json;
 extern crate syn;
 
 use clap::{App, Arg};
-use failure::Error;
 use quote::ToTokens;
-use std::env;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{self, SeekFrom};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use syn::{Ident, Item, ItemExternCrate, ItemUse, Visibility};
+use syn::{Item, ItemUse};
 
 mod compile;
 
 fn main() {
-    let reserved_names = &[
-        Ident::from("crate"),
-        Ident::from("self"),
-        Ident::from("std"),
-        Ident::from("super")
-    ]; // TODO const fn
-
     let matches = App::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
@@ -87,12 +78,6 @@ fn main() {
         }
     };
 
-    let existing_crates = find_crates();
-
-    if let Err(ref err) = existing_crates {
-        println!("warning: failed to find existing extern crates: {}", err);
-    }
-
     let mut syntax = match syn::parse_file(&src) {
         Ok(syntax) => syntax,
         Err(err) => {
@@ -120,24 +105,6 @@ fn main() {
         let mut modified = false;
 
         if let Some(path) = path {
-            if let Some(first) = path.prefix.first() {
-                let item = first.into_value();
-                if !reserved_names.contains(item) {
-                    if let Ok(existing_crates) = existing_crates {
-                        if !existing_crates.contains(item) {
-                            crates.push(Item::ExternCrate(ItemExternCrate {
-                                attrs: Vec::new(),
-                                vis: Visibility::Inherited,
-                                extern_token: syn::token::Extern::default(),
-                                crate_token: syn::token::Crate::default(),
-                                ident: *item,
-                                rename: None,
-                                semi_token: syn::token::Semi::default()
-                            }));
-                        }
-                    }
-                }
-            }
             uses.push(Item::Use(path));
             modified = true;
         }
@@ -228,41 +195,4 @@ fn is_extern_crate(item: &Item) -> bool {
 }
 fn is_use(item: &Item) -> bool {
     if let Item::Use(_) = *item { true } else { false }
-}
-
-#[derive(Debug, Fail)]
-#[fail(display = "failed to find main.rs or lib.rs")]
-struct NotFoundError;
-
-fn find_crates() -> Result<Vec<syn::Ident>, Error> {
-    let mut path = env::current_dir()?;
-    while !path.join("Cargo.toml").exists() {
-        if !path.pop() {
-            return Err(NotFoundError.into());
-        }
-    }
-    path.push("src");
-    path.push("main.rs");
-    if !path.exists() {
-        path.pop();
-        path.push("lib.rs");
-    }
-    if !path.exists() {
-        return Err(NotFoundError.into());
-    }
-
-    let mut src = String::new();
-    File::open(&path)?.read_to_string(&mut src)?;
-
-    let syntax = syn::parse_file(&src)?;
-
-    let mut crates = Vec::with_capacity(8); // just a guess
-
-    for item in &syntax.items {
-        if let Item::ExternCrate(ref ext) = *item {
-            let name = ext.rename.map(|rename| rename.1).unwrap_or(ext.ident);
-            crates.push(name);
-        }
-    };
-    Ok(crates)
 }

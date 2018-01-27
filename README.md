@@ -13,8 +13,8 @@ Having a reliable way to add an import statement would greatly help with this.
  - [ ] Preserve formatting (Discussion in #3)
  - [ ] Sort imports
  - [x] Actually make it work somewhat
- - [x] Add missing `extern crate`s
  - [x] Basic auto-importing
+ - ~~[x] Add missing `extern crate`s~~
 
 ## How do I use it?
 
