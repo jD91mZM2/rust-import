@@ -14,7 +14,7 @@ use std::{
     path::Path,
     process::{Command, Stdio}
 };
-use syn::{Item, ItemUse, UseTree, punctuated::Punctuated};
+use syn::{punctuated::Punctuated, Item, ItemUse, UseTree};
 
 mod compile;
 
@@ -39,6 +39,10 @@ fn main() {
             .help("Group all imports into trees")
             .short("g")
             .long("group"))
+        .arg(Arg::with_name("sort")
+            .help("Sort all imports alphabetically")
+            .short("s")
+            .long("sort"))
         .get_matches();
 
     let file_name = Path::new(matches.value_of("file").unwrap());
@@ -46,6 +50,7 @@ fn main() {
     let print = matches.is_present("print");
     let auto  = matches.is_present("auto");
     let group = matches.is_present("group");
+    let sort = matches.is_present("sort");
 
     let mut file = match OpenOptions::new().read(true).write(true).open(&file_name) {
         Ok(file) => file,
@@ -133,6 +138,9 @@ fn main() {
         let (new_modified, new_uses) = group_uses(uses);
         modified = new_modified;
         uses = new_uses;
+    }
+    if sort {
+        modified = sort_uses(&mut uses);
     }
 
     if print {
@@ -290,4 +298,69 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
     }
 
     (modified, grouped_uses)
+}
+
+#[derive(PartialOrd, Ord, PartialEq, Eq)]
+enum UseOrd {
+    EmptyGroup,
+    Glob,
+    Ident(syn::Ident)
+}
+impl UseOrd {
+    fn new(tree: &UseTree) -> Self {
+        match *tree {
+            UseTree::Path(ref path) => UseOrd::Ident(path.ident),
+            UseTree::Name(ref name) => UseOrd::Ident(name.ident),
+            UseTree::Rename(ref rename) => UseOrd::Ident(rename.ident),
+            UseTree::Glob(_) => UseOrd::Glob,
+            UseTree::Group(ref group) => {
+                group.items.iter().next()
+                    .map(UseOrd::new)
+                    .unwrap_or(UseOrd::EmptyGroup)
+            }
+        }
+    }
+}
+
+fn sort_inner(tree: &mut UseTree) -> bool {
+    match *tree {
+        UseTree::Path(ref mut path) => {
+            sort_inner(&mut *path.tree)
+        },
+        UseTree::Group(ref mut group) => {
+            // temporary ownership
+            let mut group2 = mem::replace(group, unsafe { mem::uninitialized() });
+
+            let mut uses: Vec<_> = group2.items.into_iter().collect();
+            let sorted = sort_uses(&mut uses);
+            group2.items = uses.into_iter().collect();
+
+            mem::forget(mem::replace(group, group2));
+            sorted
+        },
+        _ => false
+    }
+}
+fn sort_uses<T: AsUseTree>(uses: &mut [T]) -> bool {
+    let mut sorted = true;
+
+    for item in uses.iter_mut() {
+        sorted = sorted && !sort_inner(item.as_tree_mut());
+    }
+
+    if sorted {
+        for slice in uses.windows(2) {
+            if UseOrd::new(slice[0].as_tree()) > UseOrd::new(slice[1].as_tree()) {
+                sorted = false;
+                break;
+            }
+        }
+    }
+
+    if sorted {
+        false
+    } else {
+        uses.sort_unstable_by_key(|item| UseOrd::new(item.as_tree()));
+        true
+    }
 }
