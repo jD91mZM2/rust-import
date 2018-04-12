@@ -7,12 +7,14 @@ extern crate syn;
 
 use clap::{App, Arg};
 use quote::ToTokens;
-use std::fs::OpenOptions;
-use std::io::prelude::*;
-use std::io::{self, SeekFrom};
-use std::path::Path;
-use std::process::{Command, Stdio};
-use syn::{Item, ItemUse};
+use std::{
+    fs::OpenOptions,
+    io::{self, prelude::*, SeekFrom},
+    mem,
+    path::Path,
+    process::{Command, Stdio}
+};
+use syn::{Item, ItemUse, UseTree, punctuated::Punctuated};
 
 mod compile;
 
@@ -24,21 +26,26 @@ fn main() {
             .help("The file to alter")
             .required(true))
         .arg(Arg::with_name("path")
-            .help("The path to add"))
+            .help("The import path to add"))
         .arg(Arg::with_name("print")
             .help("Print all existing imports")
             .short("p")
             .long("print"))
         .arg(Arg::with_name("auto")
-            .help("Fight the compiler, attempt at auto-import")
+            .help("Fight the compiler, attempt to auto-import")
             .short("a")
             .long("auto-import"))
+        .arg(Arg::with_name("group")
+            .help("Group all imports into trees")
+            .short("g")
+            .long("group"))
         .get_matches();
 
-    let auto = matches.is_present("auto");
     let file_name = Path::new(matches.value_of("file").unwrap());
-    let path = matches.value_of("path");
+    let path  = matches.value_of("path");
     let print = matches.is_present("print");
+    let auto  = matches.is_present("auto");
+    let group = matches.is_present("group");
 
     let mut file = match OpenOptions::new().read(true).write(true).open(&file_name) {
         Ok(file) => file,
@@ -96,8 +103,8 @@ fn main() {
 
         syntax.items.retain(|item| {
             match *item {
-                Item::ExternCrate(_) => { crates.push(item.clone()); false },
-                Item::Use(_) => { uses.push(item.clone()); false },
+                Item::ExternCrate(ref inner) => { crates.push(inner.clone()); false },
+                Item::Use(ref inner) =>         { uses.push(inner.clone());   false },
                 _ => true
             }
         });
@@ -105,7 +112,7 @@ fn main() {
         let mut modified = false;
 
         if let Some(path) = path {
-            uses.push(Item::Use(path));
+            uses.push(path);
             modified = true;
         }
 
@@ -113,7 +120,7 @@ fn main() {
             match compile::compile(file_name) {
                 Ok(imports) => {
                     if !imports.is_empty() {
-                        uses.extend(imports.into_iter().map(|(_, item)| Item::Use(item)));
+                        uses.extend(imports.into_iter().map(|(_, item)| item));
                         modified = true;
                     }
                 }
@@ -123,11 +130,16 @@ fn main() {
                 }
             }
         }
+        if group {
+            let (new_modified, new_uses) = group_uses(uses);
+            modified = new_modified;
+            uses = new_uses;
+        }
 
         let result = if modified {
             let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
-            result.extend_from_slice(&crates);
-            result.extend_from_slice(&uses);
+            result.extend(crates.iter().cloned().map(|item| Item::ExternCrate(item)));
+            result.extend(uses.iter().cloned().map(|item| Item::Use(item)));
             result.extend_from_slice(&syntax.items);
             Some(result)
         } else {
@@ -136,9 +148,7 @@ fn main() {
 
         if print {
             for item in uses {
-                if let Item::Use(import) = item {
-                    println!("{}", import.into_tokens());
-                } else { unreachable!(); }
+                println!("{}", item.into_tokens());
             }
         }
 
@@ -195,4 +205,96 @@ fn is_extern_crate(item: &Item) -> bool {
 }
 fn is_use(item: &Item) -> bool {
     if let Item::Use(_) = *item { true } else { false }
+}
+
+trait AsUseTree {
+    fn as_tree(&self) -> &syn::UseTree;
+    fn as_tree_mut(&mut self) -> &mut syn::UseTree;
+    fn into_tree(self) -> syn::UseTree;
+}
+
+impl AsUseTree for syn::ItemUse {
+    fn as_tree(&self) -> &syn::UseTree { &self.tree }
+    fn as_tree_mut(&mut self) -> &mut syn::UseTree { &mut self.tree }
+    fn into_tree(self) -> syn::UseTree { self.tree }
+}
+impl AsUseTree for syn::UseTree {
+    fn as_tree(&self) -> &syn::UseTree { self }
+    fn as_tree_mut(&mut self) -> &mut syn::UseTree { self }
+    fn into_tree(self) -> syn::UseTree { self }
+}
+
+fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
+    let mut grouped_uses: Vec<T> = Vec::with_capacity(uses.len());
+    let mut modified = false;
+
+    for item in uses {
+        {
+            let mut group = None;
+            if let UseTree::Path(ref path) = *item.as_tree() {
+                group = grouped_uses.iter_mut().find(|item| {
+                    if let UseTree::Path(ref path2) = *item.as_tree() {
+                        if path.ident == path2.ident {
+                            return true;
+                        }
+                    }
+                    false
+                });
+            }
+            if let Some(group) = group {
+                if let UseTree::Path(ref mut path) = *group.as_tree_mut() {
+                    modified = true;
+                    println!("Merging with: {:?}", path.ident);
+
+                    let value = if let UseTree::Path(path) = item.into_tree() {
+                        *path.tree
+                    } else { unreachable!(); };
+
+                    let values = if let UseTree::Group(group) = value {
+                        group.items
+                    } else {
+                        let mut list = Punctuated::new();
+                        list.push_value(value);
+                        list
+                    };
+
+                    if let UseTree::Group(ref mut group) = *path.tree {
+                        let mut list = &mut group.items;
+                        for value in values {
+                            list.push(value);
+                        }
+                    } else {
+                        let mut list = values;
+                        // temporary ownership
+                        let tree = mem::replace(&mut *path.tree, unsafe { mem::uninitialized() });
+                        list.push(tree);
+
+                        mem::forget(mem::replace(&mut *path.tree, UseTree::Group(syn::UseGroup {
+                            brace_token: syn::token::Brace::default(),
+                            items: list
+                        })));
+                    };
+                } else { unreachable!(); }
+                continue;
+            }
+        }
+        grouped_uses.push(item);
+    }
+
+    for item in &mut grouped_uses {
+        if let UseTree::Path(ref mut path) = *item.as_tree_mut() {
+            if let UseTree::Group(ref mut group) = *path.tree {
+                // temporary ownership
+                let mut group2 = mem::replace(group, unsafe { mem::uninitialized() });
+
+                let mut uses = group2.items.into_iter().collect();
+                let (_, uses) = group_uses(uses);
+                group2.items = uses.into_iter().collect();
+
+                mem::forget(mem::replace(group, group2));
+            }
+        }
+    }
+
+    (modified, grouped_uses)
 }

@@ -3,13 +3,13 @@ authors = ["jD91mZM2 <me@krake.one>"]
 name = "rust-import"
 version = "0.1.0"
 [dependencies]
-clap = "2.29.0"
+clap = "2.31.2"
 failure = "0.1.1"
-quote = "0.4.2"
-serde = "1.0.27"
-serde_derive = "1.0.27"
-serde_json = "1.0.9"
+quote = "0.5.1"
+serde = "1.0.37"
+serde_derive = "1.0.37"
+serde_json = "1.0.13"
 
 [dependencies.syn]
 features = ["full", "parsing", "printing"]
-version = "0.12.0"
+version = "0.13.1"

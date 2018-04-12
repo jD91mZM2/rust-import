@@ -9,11 +9,11 @@ Having a reliable way to add an import statement would greatly help with this.
 
 ## Goals
 
- - [ ] Group imports
  - [ ] Preserve formatting (Discussion in #3)
  - [ ] Sort imports
  - [x] Actually make it work somewhat
  - [x] Basic auto-importing
+ - [x] Group imports
  - ~~[x] Add missing `extern crate`s~~
 
 ## How do I use it?
