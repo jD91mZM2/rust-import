@@ -92,72 +92,65 @@ fn main() {
             return;
         }
     };
-    let result = {
-        // Count how much to allocate
-        let crates_len = syntax.items.iter().filter(|&item| is_extern_crate(item)).count();
-        let uses_len   = syntax.items.iter().filter(|&item| is_use(item)).count();
+    // Count how much to allocate
+    let crates_len = syntax.items.iter().filter(|&item| is_extern_crate(item)).count();
+    let uses_len   = syntax.items.iter().filter(|&item| is_use(item)).count();
 
-        // Separate crates and uses from the rest
-        let mut crates = Vec::with_capacity(crates_len);
-        let mut uses   = Vec::with_capacity(uses_len);
+    // Separate crates and uses from the rest
+    let mut crates = Vec::with_capacity(crates_len);
+    let mut uses   = Vec::with_capacity(uses_len);
 
-        syntax.items.retain(|item| {
-            match *item {
-                Item::ExternCrate(ref inner) => { crates.push(inner.clone()); false },
-                Item::Use(ref inner) =>         { uses.push(inner.clone());   false },
-                _ => true
-            }
-        });
-
-        let mut modified = false;
-
-        if let Some(path) = path {
-            uses.push(path);
-            modified = true;
+    syntax.items.retain(|item| {
+        match *item {
+            Item::ExternCrate(ref inner) => { crates.push(inner.clone()); false },
+            Item::Use(ref inner) =>         { uses.push(inner.clone());   false },
+            _ => true
         }
+    });
 
-        if auto {
-            match compile::compile(file_name) {
-                Ok(imports) => {
-                    if !imports.is_empty() {
-                        uses.extend(imports.into_iter().map(|(_, item)| item));
-                        modified = true;
-                    }
-                }
-                Err(err) => {
-                    eprintln!("auto import failed: {}", err);
-                    return;
+    let mut modified = false;
+
+    if let Some(path) = path {
+        uses.push(path);
+        modified = true;
+    }
+
+    if auto {
+        match compile::compile(file_name) {
+            Ok(imports) => {
+                if !imports.is_empty() {
+                    uses.extend(imports.into_iter().map(|(_, item)| item));
+                    modified = true;
                 }
             }
-        }
-        if group {
-            let (new_modified, new_uses) = group_uses(uses);
-            modified = new_modified;
-            uses = new_uses;
-        }
-
-        let result = if modified {
-            let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
-            result.extend(crates.iter().cloned().map(|item| Item::ExternCrate(item)));
-            result.extend(uses.iter().cloned().map(|item| Item::Use(item)));
-            result.extend_from_slice(&syntax.items);
-            Some(result)
-        } else {
-            None
-        };
-
-        if print {
-            for item in uses {
-                println!("{}", item.into_tokens());
+            Err(err) => {
+                eprintln!("auto import failed: {}", err);
+                return;
             }
         }
+    }
+    if group {
+        let (new_modified, new_uses) = group_uses(uses);
+        modified = new_modified;
+        uses = new_uses;
+    }
 
-        if !modified {
-            return;
+    if print {
+        for item in &uses {
+            let mut tokens = quote::Tokens::new();
+            item.to_tokens(&mut tokens);
+            println!("{}", tokens);
         }
+    }
 
-        result.unwrap()
-    };
+    if !modified {
+        return;
+    }
+
+    let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
+    result.extend(crates.into_iter().map(|item| Item::ExternCrate(item)));
+    result.extend(uses.into_iter().map(|item| Item::Use(item)));
+    result.extend(syntax.items);
 
     syntax.items = result;
 
