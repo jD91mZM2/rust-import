@@ -11,6 +11,7 @@ use std::{
     fs::OpenOptions,
     io::{self, prelude::*, SeekFrom},
     mem,
+    panic::{self, UnwindSafe},
     path::Path,
     process::{Command, Stdio}
 };
@@ -208,6 +209,23 @@ fn is_use(item: &Item) -> bool {
     if let Item::Use(_) = *item { true } else { false }
 }
 
+fn borrow_ownership<T, F, R>(t: &mut T, callback: F) -> R
+    where T: UnwindSafe,
+          F: FnOnce(T) -> (T, R) + UnwindSafe
+{
+    let tmp = mem::replace(t, unsafe { mem::uninitialized() });
+    let result = panic::catch_unwind(|| {
+        callback(tmp)
+    });
+    match result {
+        Ok((tmp, val)) => { mem::forget(mem::replace(t, tmp)); val },
+        Err(err) => {
+            mem::forget(t);
+            panic::resume_unwind(err);
+        }
+    }
+}
+
 trait AsUseTree {
     fn as_tree(&self) -> &syn::UseTree;
     fn as_tree_mut(&mut self) -> &mut syn::UseTree;
@@ -266,14 +284,13 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
                         }
                     } else {
                         let mut list = values;
-                        // temporary ownership
-                        let tree = mem::replace(&mut *path.tree, unsafe { mem::uninitialized() });
-                        list.push(tree);
-
-                        mem::forget(mem::replace(&mut *path.tree, UseTree::Group(syn::UseGroup {
-                            brace_token: syn::token::Brace::default(),
-                            items: list
-                        })));
+                        borrow_ownership(&mut *path.tree, |tree| {
+                            list.push(tree);
+                            (UseTree::Group(syn::UseGroup {
+                                brace_token: syn::token::Brace::default(),
+                                items: list
+                            }), ())
+                        });
                     };
                 } else { unreachable!(); }
                 continue;
@@ -285,14 +302,12 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
     for item in &mut grouped_uses {
         if let UseTree::Path(ref mut path) = *item.as_tree_mut() {
             if let UseTree::Group(ref mut group) = *path.tree {
-                // temporary ownership
-                let mut group2 = mem::replace(group, unsafe { mem::uninitialized() });
-
-                let mut uses = group2.items.into_iter().collect();
-                let (_, uses) = group_uses(uses);
-                group2.items = uses.into_iter().collect();
-
-                mem::forget(mem::replace(group, group2));
+                borrow_ownership(group, |mut group| {
+                    let uses = group.items.into_iter().collect();
+                    let (_, uses) = group_uses(uses);
+                    group.items = uses.into_iter().collect();
+                    (group, ())
+                });
             }
         }
     }
@@ -328,14 +343,13 @@ fn sort_inner(tree: &mut UseTree) -> bool {
             sort_inner(&mut *path.tree)
         },
         UseTree::Group(ref mut group) => {
-            // temporary ownership
-            let mut group2 = mem::replace(group, unsafe { mem::uninitialized() });
+            let sorted = borrow_ownership(&mut *group, |mut group| {
+                let mut uses: Vec<_> = group.items.into_iter().collect();
+                let sorted = sort_uses(&mut uses);
+                group.items = uses.into_iter().collect();
+                (group, sorted)
+            });
 
-            let mut uses: Vec<_> = group2.items.into_iter().collect();
-            let sorted = sort_uses(&mut uses);
-            group2.items = uses.into_iter().collect();
-
-            mem::forget(mem::replace(group, group2));
             sorted
         },
         _ => false
