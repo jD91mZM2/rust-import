@@ -4,14 +4,13 @@ extern crate failure;
 extern crate quote;
 extern crate serde_json;
 extern crate syn;
+extern crate take_mut;
 
 use clap::{App, Arg};
 use quote::ToTokens;
 use std::{
     fs::OpenOptions,
     io::{self, prelude::*, SeekFrom},
-    mem,
-    panic::{self, UnwindSafe},
     path::Path,
     process::{Command, Stdio}
 };
@@ -209,23 +208,6 @@ fn is_use(item: &Item) -> bool {
     if let Item::Use(_) = *item { true } else { false }
 }
 
-fn borrow_ownership<T, F, R>(t: &mut T, callback: F) -> R
-    where T: UnwindSafe,
-          F: FnOnce(T) -> (T, R) + UnwindSafe
-{
-    let tmp = mem::replace(t, unsafe { mem::uninitialized() });
-    let result = panic::catch_unwind(|| {
-        callback(tmp)
-    });
-    match result {
-        Ok((tmp, val)) => { mem::forget(mem::replace(t, tmp)); val },
-        Err(err) => {
-            mem::forget(t);
-            panic::resume_unwind(err);
-        }
-    }
-}
-
 trait AsUseTree {
     fn as_tree(&self) -> &syn::UseTree;
     fn as_tree_mut(&mut self) -> &mut syn::UseTree;
@@ -263,7 +245,6 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
             if let Some(group) = group {
                 if let UseTree::Path(ref mut path) = *group.as_tree_mut() {
                     modified = true;
-                    println!("Merging with: {:?}", path.ident);
 
                     let value = if let UseTree::Path(path) = item.into_tree() {
                         *path.tree
@@ -284,12 +265,12 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
                         }
                     } else {
                         let mut list = values;
-                        borrow_ownership(&mut *path.tree, |tree| {
+                        take_mut::take(&mut *path.tree, |tree| {
                             list.push(tree);
-                            (UseTree::Group(syn::UseGroup {
+                            UseTree::Group(syn::UseGroup {
                                 brace_token: syn::token::Brace::default(),
                                 items: list
-                            }), ())
+                            })
                         });
                     };
                 } else { unreachable!(); }
@@ -302,11 +283,11 @@ fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
     for item in &mut grouped_uses {
         if let UseTree::Path(ref mut path) = *item.as_tree_mut() {
             if let UseTree::Group(ref mut group) = *path.tree {
-                borrow_ownership(group, |mut group| {
+                take_mut::take(group, |mut group| {
                     let uses = group.items.into_iter().collect();
                     let (_, uses) = group_uses(uses);
                     group.items = uses.into_iter().collect();
-                    (group, ())
+                    group
                 });
             }
         }
@@ -343,11 +324,12 @@ fn sort_inner(tree: &mut UseTree) -> bool {
             sort_inner(&mut *path.tree)
         },
         UseTree::Group(ref mut group) => {
-            let sorted = borrow_ownership(&mut *group, |mut group| {
+            let mut sorted = false;
+            take_mut::take(&mut *group, |mut group| {
                 let mut uses: Vec<_> = group.items.into_iter().collect();
-                let sorted = sort_uses(&mut uses);
+                sorted = sort_uses(&mut uses);
                 group.items = uses.into_iter().collect();
-                (group, sorted)
+                group
             });
 
             sorted
