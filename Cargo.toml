@@ -5,12 +5,12 @@ version = "0.1.0"
 [dependencies]
 clap = "2.31.2"
 failure = "0.1.1"
-quote = "0.5.1"
-serde = "1.0.37"
-serde_derive = "1.0.37"
-serde_json = "1.0.13"
+quote = "0.5.2"
+serde = "1.0.43"
+serde_derive = "1.0.43"
+serde_json = "1.0.16"
 take_mut = "0.2.2"
 
 [dependencies.syn]
-features = ["full", "parsing", "printing"]
-version = "0.13.1"
+features = ["full", "parsing", "printing", "extra-traits"]
+version = "0.13.4"

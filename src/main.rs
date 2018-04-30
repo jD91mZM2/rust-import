@@ -208,40 +208,44 @@ fn is_use(item: &Item) -> bool {
     if let Item::Use(_) = *item { true } else { false }
 }
 
-trait AsUseTree {
+trait UseStmt {
     fn as_tree(&self) -> &syn::UseTree;
     fn as_tree_mut(&mut self) -> &mut syn::UseTree;
     fn into_tree(self) -> syn::UseTree;
+    fn should_group(&self, other: &Self) -> bool;
 }
 
-impl AsUseTree for syn::ItemUse {
+impl UseStmt for syn::ItemUse {
     fn as_tree(&self) -> &syn::UseTree { &self.tree }
     fn as_tree_mut(&mut self) -> &mut syn::UseTree { &mut self.tree }
     fn into_tree(self) -> syn::UseTree { self.tree }
+    fn should_group(&self, other: &Self) -> bool {
+        self.tree.should_group(&other.tree) &&
+            self.attrs == other.attrs
+    }
 }
-impl AsUseTree for syn::UseTree {
+impl UseStmt for syn::UseTree {
     fn as_tree(&self) -> &syn::UseTree { self }
     fn as_tree_mut(&mut self) -> &mut syn::UseTree { self }
     fn into_tree(self) -> syn::UseTree { self }
+    fn should_group(&self, other: &Self) -> bool {
+        if let UseTree::Path(ref path) = *self {
+            if let UseTree::Path(ref other_path) = *other {
+                return path.ident == other_path.ident;
+            }
+        }
+        false
+    }
 }
 
-fn group_uses<T: AsUseTree>(uses: Vec<T>) -> (bool, Vec<T>) {
+fn group_uses<T: UseStmt>(uses: Vec<T>) -> (bool, Vec<T>) {
     let mut grouped_uses: Vec<T> = Vec::with_capacity(uses.len());
     let mut modified = false;
 
     for item in uses {
         {
-            let mut group = None;
-            if let UseTree::Path(ref path) = *item.as_tree() {
-                group = grouped_uses.iter_mut().find(|item| {
-                    if let UseTree::Path(ref path2) = *item.as_tree() {
-                        if path.ident == path2.ident {
-                            return true;
-                        }
-                    }
-                    false
-                });
-            }
+            let group = grouped_uses.iter_mut().find(|existing| item.should_group(existing));
+
             if let Some(group) = group {
                 if let UseTree::Path(ref mut path) = *group.as_tree_mut() {
                     modified = true;
@@ -337,7 +341,7 @@ fn sort_inner(tree: &mut UseTree) -> bool {
         _ => false
     }
 }
-fn sort_uses<T: AsUseTree>(uses: &mut [T]) -> bool {
+fn sort_uses<T: UseStmt>(uses: &mut [T]) -> bool {
     let mut sorted = true;
 
     for item in uses.iter_mut() {
