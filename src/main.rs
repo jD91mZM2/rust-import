@@ -24,9 +24,13 @@ fn main() {
         .version(crate_version!())
         .arg(Arg::with_name("file")
             .help("The file to alter")
-            .required(true))
-        .arg(Arg::with_name("path")
-            .help("The import path to add"))
+            .required(true)
+            .multiple(true))
+        .arg(Arg::with_name("import")
+            .help("The import path to add")
+            .short("i")
+            .multiple(true)
+            .number_of_values(1))
         .arg(Arg::with_name("print")
             .help("Print all existing imports")
             .short("p")
@@ -45,159 +49,166 @@ fn main() {
             .long("sort"))
         .get_matches();
 
-    let file_name = Path::new(matches.value_of("file").unwrap());
-    let path  = matches.value_of("path");
+    let filenames = matches.values_of("file").unwrap();
+    let imports   = matches.values_of("import");
     let print = matches.is_present("print");
     let auto  = matches.is_present("auto");
     let group = matches.is_present("group");
     let sort = matches.is_present("sort");
 
-    let mut file = match OpenOptions::new().read(true).write(true).open(&file_name) {
-        Ok(file) => file,
+    let imports: Result<Vec<ItemUse>, syn::synom::ParseError> = imports
+        .map(|imports| {
+            imports
+                .map(|path| {
+                    let path = path.trim();
+                    let mut string = String::with_capacity(4 + path.len() + 1);
+                    string.push_str(path);
+                    if !path.ends_with(';') {
+                        string.push(';');
+                    }
+
+                    syn::parse_str(&string)
+                        .or_else(|_| {
+                            string.insert_str(0, "use ");
+                            syn::parse_str(&string)
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| Ok(Vec::new()));
+    let imports = match imports {
+        Ok(imports) => imports,
         Err(err) => {
-            eprintln!("failed to open file: {}", err);
+            eprintln!("failed to parse path: {}", err);
             return;
         }
     };
 
-    let mut src = String::new();
-    if let Err(err) = file.read_to_string(&mut src) {
-        eprintln!("error reading file: {}", err);
-        return;
-    }
-
-    let path = match path {
-        None => None,
-        Some(path) => {
-            let mut string = String::with_capacity(4 + path.len() + 1);
-            if !path.starts_with("use ") {
-                string.push_str("use ");
-            }
-            string.push_str(path);
-            if !path.ends_with(';') {
-                string.push(';');
-            }
-
-            let syntax: ItemUse = match syn::parse_str(&string) {
-                Ok(syntax) => syntax,
-                Err(err) => {
-                    eprintln!("failed to parse path: {}", err);
-                    return;
-                }
-            };
-
-            Some(syntax)
-        }
-    };
-
-    let mut syntax = match syn::parse_file(&src) {
-        Ok(syntax) => syntax,
-        Err(err) => {
-            eprintln!("failed to parse file: {}", err);
-            return;
-        }
-    };
-    // Count how much to allocate
-    let crates_len = syntax.items.iter().filter(|&item| is_extern_crate(item)).count();
-    let uses_len   = syntax.items.iter().filter(|&item| is_use(item)).count();
-
-    // Separate crates and uses from the rest
-    let mut crates = Vec::with_capacity(crates_len);
-    let mut uses   = Vec::with_capacity(uses_len);
-
-    syntax.items.retain(|item| {
-        match *item {
-            Item::ExternCrate(ref inner) => { crates.push(inner.clone()); false },
-            Item::Use(ref inner) =>         { uses.push(inner.clone());   false },
-            _ => true
-        }
-    });
-
-    let mut modified = false;
-
-    if let Some(path) = path {
-        uses.push(path);
-        modified = true;
-    }
-
-    if auto {
-        match compile::compile(file_name) {
-            Ok(imports) => {
-                if !imports.is_empty() {
-                    uses.extend(imports.into_iter().map(|(_, item)| item));
-                    modified = true;
-                }
-            }
+    for filename in filenames {
+        let filename = Path::new(filename);
+        let mut file = match OpenOptions::new().read(true).write(true).open(&filename) {
+            Ok(file) => file,
             Err(err) => {
-                eprintln!("auto import failed: {}", err);
+                eprintln!("failed to open file {:?}: {}", filename, err);
                 return;
             }
-        }
-    }
-    if group {
-        let (new_modified, new_uses) = group_uses(uses);
-        modified = new_modified;
-        uses = new_uses;
-    }
-    if sort {
-        modified = sort_uses(&mut uses);
-    }
+        };
 
-    if print {
-        for item in &uses {
-            let mut tokens = quote::Tokens::new();
-            item.to_tokens(&mut tokens);
-            println!("{}", tokens);
-        }
-    }
-
-    if !modified {
-        return;
-    }
-
-    let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
-    result.extend(crates.into_iter().map(|item| Item::ExternCrate(item)));
-    result.extend(uses.into_iter().map(|item| Item::Use(item)));
-    result.extend(syntax.items);
-
-    syntax.items = result;
-
-    // TODO: https://github.com/dtolnay/syn/issues/294
-    let child = Command::new("rustfmt")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let child = match child {
-        Ok(child) => child,
-        Err(err) => {
-            eprintln!("failed to run command: {}", err);
+        let mut src = String::new();
+        if let Err(err) = file.read_to_string(&mut src) {
+            eprintln!("error reading file: {}", err);
             return;
         }
-    };
 
-    if let Err(err) = child.stdin.unwrap().write_all(syntax.into_tokens().to_string().as_bytes()) {
-        eprintln!("failed to write to rustfmt: {}", err);
-        return;
-    }
+        let mut syntax = match syn::parse_file(&src) {
+            Ok(syntax) => syntax,
+            Err(err) => {
+                eprintln!("failed to parse file: {}", err);
+                return;
+            }
+        };
+        // Count how much to allocate
+        let crates_len = syntax.items.iter().filter(|&item| is_extern_crate(item)).count();
+        let uses_len   = syntax.items.iter().filter(|&item| is_use(item)).count();
 
-    let mut error = String::new();
-    if let Err(err) = child.stderr.unwrap().read_to_string(&mut error) {
-        eprintln!("failed to read stderr: {}", err);
-        return;
-    }
-    let error = error.trim();
-    if !error.chars().all(char::is_whitespace) {
-        eprintln!("rustfmt returned error: {}", error);
-        return;
-    }
+        // Separate crates and uses from the rest
+        let mut crates = Vec::with_capacity(crates_len);
+        let mut uses   = Vec::with_capacity(uses_len);
 
-    if let Err(err) = file.seek(SeekFrom::Start(0)).and_then(|_| file.set_len(0)) {
-        eprintln!("failed to truncate file: {}", err);
-        return;
-    }
-    if let Err(err) = io::copy(&mut child.stdout.unwrap(), &mut file) {
-        eprintln!("error writing to file: {}", err);
+        syntax.items.retain(|item| {
+            match *item {
+                Item::ExternCrate(ref inner) => { crates.push(inner.clone()); false },
+                Item::Use(ref inner) =>         { uses.push(inner.clone());   false },
+                _ => true
+            }
+        });
+
+        let mut modified = false;
+
+        for path in &imports {
+            uses.push(path.clone());
+            modified = true;
+        }
+
+        if auto {
+            match compile::compile(&filename) {
+                Ok(imports) => {
+                    if !imports.is_empty() {
+                        uses.extend(imports.into_iter().map(|(_, item)| item));
+                        modified = true;
+                    }
+                }
+                Err(err) => {
+                    eprintln!("auto import failed: {}", err);
+                    return;
+                }
+            }
+        }
+        if group {
+            let (new_modified, new_uses) = group_uses(uses);
+            modified = new_modified;
+            uses = new_uses;
+        }
+        if sort {
+            modified = sort_uses(&mut uses);
+        }
+
+        if print {
+            for item in &uses {
+                let mut tokens = quote::Tokens::new();
+                item.to_tokens(&mut tokens);
+                println!("{}", tokens);
+            }
+        }
+
+        if !modified {
+            return;
+        }
+
+        let mut result = Vec::with_capacity(crates.len() + uses.len() + syntax.items.len());
+        result.extend(crates.into_iter().map(|item| Item::ExternCrate(item)));
+        result.extend(uses.into_iter().map(|item| Item::Use(item)));
+        result.extend(syntax.items);
+
+        syntax.items = result;
+
+        // TODO: https://github.com/dtolnay/syn/issues/294
+        let child = Command::new("rustfmt")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let child = match child {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("failed to run command: {}", err);
+                return;
+            }
+        };
+
+        if let Err(err) = child.stdin.unwrap().write_all(syntax.into_tokens().to_string().as_bytes()) {
+            eprintln!("failed to write to rustfmt: {}", err);
+            return;
+        }
+
+        let mut error = String::new();
+        if let Err(err) = child.stderr.unwrap().read_to_string(&mut error) {
+            eprintln!("failed to read stderr: {}", err);
+            return;
+        }
+        let error = error.trim();
+        if !error.chars().all(char::is_whitespace) {
+            eprintln!("rustfmt returned error: {}", error);
+            return;
+        }
+
+        if let Err(err) = file.seek(SeekFrom::Start(0)).and_then(|_| file.set_len(0)) {
+            eprintln!("failed to truncate file: {}", err);
+            return;
+        }
+        if let Err(err) = io::copy(&mut child.stdout.unwrap(), &mut file) {
+            eprintln!("error writing to file: {}", err);
+        }
     }
 }
 
